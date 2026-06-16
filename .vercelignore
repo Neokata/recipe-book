@@ -1,0 +1,8 @@
+# Vercel — keep this small
+node_modules
+.next
+out
+.vercel
+.env*
+scripts/
+*.log
