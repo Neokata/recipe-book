@@ -10,3 +10,5 @@ out
 .vscode
 scripts/__pycache__/
 *.pyc
+
+.vercel
