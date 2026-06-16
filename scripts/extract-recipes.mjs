@@ -347,9 +347,22 @@ function parseIngredient(raw) {
   return { text, qty, unit, name };
 }
 
-function extractIngredientsAndSteps(text) {
-  if (!text) return { ingredients: [], steps: [] };
+function extractIngredientsAndSteps(text, recipeTitle) {
+  if (!text) return { ingredientSections: [{ name: null, ingredients: [] }], steps: [] };
   let lines = text.split(/\r?\n/).map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
+
+  // If we know the recipe title, strip the first occurrence of a line that
+  // looks like the title (PDFs and docx often include the title at the top
+  // and we'd otherwise treat it as a sub-section header).
+  if (recipeTitle) {
+    const titleSlug = slugify(recipeTitle);
+    for (let i = 0; i < lines.length; i++) {
+      if (slugify(lines[i]) === titleSlug) {
+        lines.splice(i, 1);
+        break;
+      }
+    }
+  }
 
   // Pass 0: detect lines that are actually multiple ingredients / multiple
   // steps concatenated without newlines, and split them.
@@ -398,6 +411,53 @@ function extractIngredientsAndSteps(text) {
   function looksLikeIngredient(line) {
     return /^(\d+(\.\d+)?(\/\d+)?|\d+\s+\d+\/\d+|[½⅓⅔¼¾⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞])/.test(line);
   }
+  // Sub-section header: short, no leading number, no qty, no sentence punctuation.
+  // Accepts:
+  //   - "Crust:"          (ends with colon)
+  //   - "VANILLA CAKE"    (ALL CAPS)
+  //   - "Toffee Sauce"    (title case, 2-4 short words, no verb)
+  // Examples that should NOT be headers:
+  //   - "Key Lime Frosting, recipe follows" (has comma)
+  //   - "Pinch fine salt" (too short / looks like a sentence fragment)
+  function looksLikeSubHeader(line) {
+    if (line.length < 2 || line.length > 50) return false;
+    if (/^\d/.test(line)) return false;
+    if (/,/.test(line)) return false;
+    if (/\?$/.test(line)) return false;
+    if (/[.!?]$/.test(line) && !line.endsWith(":")) return false;
+
+    // Path 1: ends with ":" (e.g. "Crust:") and no cooking verb
+    if (line.endsWith(":")) {
+      if (!/\b(preheat|mix|stir|bake|whisk|fold|combine|add|pour|place|remove|serve|cook|spread|cream|beat|combine|chop|slice|dice|mince|grate|juice|zest|simmer|boil|broil|roast|saute)\b/i.test(line)) {
+        return true;
+      }
+    }
+
+    // Path 2: ALL CAPS phrase (e.g. "VANILLA CAKE", "BERRY FILLING")
+    if (/^[A-Z][A-Z\s&]+$/.test(line) && line.length > 2) return true;
+
+    // Path 3: title case, 2-4 short words, no verb, no sentence punctuation
+    // Examples: "Toffee Sauce", "Cookie Butter Frosting", "Key Lime Curd"
+    const words = line.replace(/[:\s]+/g, " ").trim().split(/\s+/);
+    if (words.length < 1 || words.length > 5) return false;
+    if (words.some((w) => /[.!?]$/.test(w))) return false;
+    // Title case: every word starts with uppercase
+    const allTitleCase = words.every((w) => /^[A-Z]/.test(w));
+    if (!allTitleCase) return false;
+    // No cooking-verb in the line
+    if (/\b(preheat|mix|stir|bake|whisk|fold|combine|add|pour|place|remove|serve|cook|spread|cream|beat|chop|slice|dice|mince|grate|juice|zest|simmer|boil|broil|roast|saute)\b/i.test(line)) return false;
+    return true;
+  }
+  // Hard-coded sub-section labels that ALWAYS signal a new sub-section
+  // (e.g. "Ingredients" → start collecting, "Instructions"/"Directions" → stop collecting)
+  function looksLikeTopLevelHeader(line) {
+    return /^(ingredients?|instructions?|directions?|method|preparation|steps?)\s*[:.]?\s*$/i.test(line);
+  }
+  // Strip a trailing ":" from a sub-section label, capitalize words
+  function cleanSectionName(name) {
+    return name.replace(/[:.\s]+$/g, "").trim();
+  }
+
   const roleOf = (line, idx) => {
     if (line.length < 2) return "skip";
     if (/^\d{1,2}\/\d{1,2}\/\d{2,4}/.test(line) || /^\d{1,2}:\d{2}\s*(am|pm)/i.test(line)) return "skip";
@@ -407,8 +467,8 @@ function extractIngredientsAndSteps(text) {
     if (isWebCtaOrIntro(line)) return "skip";
     if (looksLikeNumberedStep(line)) return "step";
     if (looksLikeIngredient(line)) return "ingredient";
-    if (line.endsWith(":") && line.length < 60 && !/\b(preheat|mix|stir|bake|whisk|fold|combine|add|pour|place|remove|serve|cook|spread|cream|beat)\b/i.test(line)) return "header";
-    if (isLikelySectionLabel(line)) return "header";
+    if (looksLikeTopLevelHeader(line)) return "header";   // "Ingredients" / "Instructions" / "Method"
+    if (looksLikeSubHeader(line)) return "header";       // "Crust:", "VANILLA CAKE", etc.
     if (line.length > 60) return "step";  // long sentence = step
     return "unknown";
   };
@@ -419,47 +479,166 @@ function extractIngredientsAndSteps(text) {
   // the surrounding context (what came before and what comes after).
   for (let i = 0; i < lines.length; i++) {
     if (roles[i] !== "unknown") continue;
-    // Look at the 2 lines before and after for hints
     const before = roles.slice(Math.max(0, i - 2), i);
     const after = roles.slice(i + 1, Math.min(lines.length, i + 3));
-    // If we're between two "ingredient" lines, we're an ingredient (e.g. "of flour" without qty)
     if (before.includes("ingredient") && after.includes("ingredient")) roles[i] = "ingredient";
-    // If we're between two "step" lines or after a step, we're a step continuation
     else if (before.includes("step")) roles[i] = "step";
-    // If we're between two headers, we're a sub-section divider — treat as header
     else if (before.includes("header") && after.includes("header")) roles[i] = "header";
     else roles[i] = "skip";
   }
 
-  // Pass 3: emit ingredients and steps in document order, but group all
-  // ingredients first (so the app shows them together), then all steps.
-  const ingredientLines = [];
-  const stepLines = [];
-  for (let i = 0; i < lines.length; i++) {
-    if (roles[i] === "ingredient") ingredientLines.push({ text: lines[i], idx: i });
-    else if (roles[i] === "step") stepLines.push({ text: lines[i], idx: i });
-  }
+  // Pass 3: assemble ingredients grouped by sub-section, plus all steps.
+  //
+  // Algorithm:
+  //   - We always have at least one "open" section that new ingredients flow into.
+  //   - When we see a sub-section HEADER, the ingredients that follow it form
+  //     a NEW section. The PREVIOUSLY open section is "closed" (its name is
+  //     either the previously-pending header, or null if no header was seen).
+  //   - A "pending header" is the most recently seen sub-section header that
+  //     hasn't yet been "applied" to a section. We apply it to the current
+  //     section as soon as we see the first ingredient that follows it.
+  //
+  // Walk-through on the Biscoff source:
+  //   1. Start: sections=[{name: null, ing: []}], current=sections[0], pending=null
+  //   2. "Crust:" header → pending="Crust"
+  //   3. "1 cup of crushed Biscoff cookies" ing → current.name=pending="Crust", then
+  //      create a new {name: null, ing: []} section, set current=new, pending=null
+  //   4. "3.5 tbsp" ing → goes into current (the unnamed one) — BUG!
+  //
+  // The off-by-one above is why I rewrote it. The new algorithm:
+  //   - "pendingHeader" is the name to apply to the NEXT section we open.
+  //   - When we open a new section (because a header preceded the first ingredient),
+  //     we apply the pendingHeader to that new section immediately.
+  //   - When we close a section (because a new header arrived), no renaming happens.
+  //
+  // Re-walk:
+  //   1. Start: sections=[{name: null, ing: []}], current=sections[0], pending=null
+  //   2. "Crust:" header → pending="Crust"
+  //   3. "1 cup..." ing → create new {name: pending="Crust", ing: []}, current=new, pending=null. Then push ing.
+  //      Now: sections=[{null, []}, {Crust, [1 ing]}], current={Crust, [1 ing]}
+  //   4. "3.5 tbsp" ing → current is {Crust}, push. ✅
+  //   5. "1.5 tbsp" ing → push. ✅
+  //   6. "Directions:" (top-level) → mode=steps
+  //   7. steps...
+  //   8. "Cheesecake:" header → pending="Cheesecake"
+  //   9. "2 packages..." ing → create new {name: pending="Cheesecake", ing: []}, current=new, pending=null. Then push.
+  //      ✅
+  //
+  // This works! Let's implement it.
+  const sections = [];
+  let currentSection = { name: null, ingredients: [] };
+  sections.push(currentSection);
+  let pendingHeader = null;  // name of the next sub-section to open
+  const steps = [];
+  let mode = null;
+  const seenIngs = new Set();
 
-  // De-dupe ingredients (some recipes have the same line listed twice)
-  const seen = new Set();
-  const ingredients = [];
-  for (const { text } of ingredientLines) {
+  function pushIngredient(text) {
     const key = text.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    ingredients.push(parseIngredient(text));
+    if (seenIngs.has(key)) return;
+    seenIngs.add(key);
+    currentSection.ingredients.push(parseIngredient(text));
   }
 
-  // Numbered steps: strip the leading "1. " / "1) " markers but keep the order.
-  let steps = stepLines.map(({ text }) =>
-    text.replace(/^\s*(\d+|[a-z]\))\s*[\.\):\-]?\s+/i, "").trim()
-  ).filter(Boolean);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const role = roles[i];
 
-  // Drop steps that look like recipe intro blurbs ("These treats are sweet and delicious!")
-  // — they're long, in present tense, end with punctuation, and contain descriptive adjectives.
-  steps = steps.filter((s) => !isRecipeIntroBlurb(s));
+    if (role === "header") {
+      // Is it a top-level header (Ingredients/Instructions/Method)?
+      if (looksLikeTopLevelHeader(line)) {
+        if (/^ingredients?\b/i.test(line)) {
+          mode = "ingredients";
+        } else if (/^instructions?|directions?|method|preparation|steps?\b/i.test(line)) {
+          mode = "steps";
+        }
+        // These don't create sub-sections
+        continue;
+      }
 
-  return { ingredients, steps };
+      // Sub-section header: defer the name until the next section opens
+      pendingHeader = cleanSectionName(line);
+      continue;
+    }
+
+    if (role === "ingredient") {
+      // If a header preceded this, open a new named section now
+      if (pendingHeader != null) {
+        currentSection = { name: pendingHeader, ingredients: [] };
+        sections.push(currentSection);
+        pendingHeader = null;
+      }
+      pushIngredient(line);
+      mode = "ingredients";
+      continue;
+    }
+
+    if (role === "step") {
+      const clean = line.replace(/^\s*(\d+|[a-z]\))\s*[\.\):\-]?\s+/i, "").trim();
+      if (!isRecipeIntroBlurb(clean) && clean) {
+        steps.push(clean);
+      }
+      mode = "steps";
+      // A header that was pending but never got applied (e.g. "Crust:" with no
+      // ingredients after it) — discard it.
+      pendingHeader = null;
+      continue;
+    }
+
+    // "skip" / "unknown" — don't change mode
+  }
+
+  // Drop any leading/trailing empty unnamed sections.
+  while (sections.length > 1 && sections[0].name == null && sections[0].ingredients.length === 0) {
+    sections.shift();
+  }
+  while (sections.length > 1 && sections[sections.length - 1].name == null && sections[sections.length - 1].ingredients.length === 0) {
+    sections.pop();
+  }
+
+  // Drop section names that are clearly not real labels (e.g. a full sentence
+  // that slipped through). A real sub-section name is a short noun phrase.
+  for (const s of sections) {
+    if (s.name && looksLikeSentenceFragment(s.name)) {
+      s.name = null;
+    }
+  }
+
+  // If after cleanup we have exactly one section, return it unnamed (flat list).
+  if (sections.length === 1) {
+    sections[0].name = null;
+  }
+
+  // If we have 2+ sections but ZERO of them are named (or only ONE is named
+  // and it's the only one with ingredients), treat as a flat list.
+  const namedSections = sections.filter((s) => s.name != null && s.ingredients.length > 0);
+  if (namedSections.length < 2 && sections.length > 1) {
+    const merged = sections.flatMap((s) => s.ingredients);
+    const seen = new Set();
+    const deduped = [];
+    for (const ing of merged) {
+      const key = ing.text.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(ing);
+    }
+    sections.length = 0;
+    sections.push({ name: null, ingredients: deduped });
+  }
+
+  return { ingredientSections: sections, steps };
+}
+
+// A "sentence fragment" name is one that contains a verb, is a question,
+// contains a comma, or otherwise looks like a regular sentence rather than
+// a sub-section label.
+function looksLikeSentenceFragment(s) {
+  if (s.length > 40) return true;
+  if (s.includes(",")) return true;
+  if ((s.match(/:/g) || []).length > 1) return true;  // multiple colons = metadata, not a section name
+  if (/\b(recipe|follows|see|note|notes|divided|optional|if you|when|until)\b/i.test(s)) return true;
+  if (/\b(is|are|was|were|will|has|have|had)\b/i.test(s) && s.split(/\s+/).length > 4) return true;
+  return false;
 }
 
 // Heuristic: a step is a "recipe intro blurb" if it's long, present-tense, descriptive
@@ -607,13 +786,16 @@ async function main() {
     seen.add(unique);
     const slugFinal = unique;
 
-    const { ingredients, steps } = isScannedPdf ? { ingredients: [], steps: [] } : extractIngredientsAndSteps(text);
+    const { ingredientSections, steps } = isScannedPdf
+      ? { ingredientSections: [{ name: null, ingredients: [] }], steps: [] }
+      : extractIngredientsAndSteps(text, title);
     const category = categorize(title, rel);
     const isNonFood = isNonFoodFile(file, text);
 
     // No image yet — the app will use a category emoji placeholder.
     const image = null;
 
+    const flatIngCount = ingredientSections.reduce((n, s) => n + s.ingredients.length, 0);
     const recipe = {
       slug: slugFinal,
       title,
@@ -623,13 +805,14 @@ async function main() {
       image,
       isNonFood: isNonFood || undefined,
       ...(isScannedPdf ? { scannedPdf: true } : {}),
-      ingredients,
+      ingredientSections,
       steps,
       rawExcerpt: text.slice(0, 600),
     };
     recipes.push(recipe);
     const tag = isScannedPdf ? " [scanned]" : "";
-    console.log(`✓${tag} ${rel} → ${slugFinal} (${category}, ${ingredients.length} ing, ${steps.length} steps)`);
+    const subCount = ingredientSections.length > 1 || ingredientSections[0].name ? ` (${ingredientSections.length} sections)` : "";
+    console.log(`✓${tag} ${rel} → ${slugFinal} (${category}, ${flatIngCount} ing${subCount}, ${steps.length} steps)`);
   }
 
   recipes.sort((a, b) => a.title.localeCompare(b.title));

@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import type { Recipe, Ingredient } from "@/lib/types";
+import type { Recipe, Ingredient, IngredientSection } from "@/lib/types";
 import { CATEGORY_MAP } from "@/lib/categories";
 import { scaleQty } from "@/lib/parse";
 import { useShoppingList } from "@/lib/store";
@@ -27,9 +27,18 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
   const toggleFav = useFavorites((s) => s.toggle);
   const isFav = favIds.includes(recipe.slug);
 
-  const scaledIngredients = useMemo(
-    () => recipe.ingredients.map((ing) => scaleIngredient(ing, factor)),
-    [recipe.ingredients, factor]
+  // Scale every section by the active factor.
+  const scaledSections = useMemo(
+    () =>
+      recipe.ingredientSections.map((sec) => ({
+        name: sec.name,
+        ingredients: sec.ingredients.map((ing) => scaleIngredient(ing, factor)),
+      })),
+    [recipe.ingredientSections, factor]
+  );
+  const totalIngredients = useMemo(
+    () => scaledSections.reduce((n, s) => n + s.ingredients.length, 0),
+    [scaledSections]
   );
 
   function flash(msg: string) {
@@ -39,7 +48,7 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
 
   function addAll() {
     let n = 0;
-    for (const ing of recipe.ingredients) {
+    for (const ing of recipe.ingredientSections.flatMap((s) => s.ingredients)) {
       add(scaleIngredient(ing, factor).text, recipe.title);
       n++;
     }
@@ -91,7 +100,7 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
             {recipe.servings && <span className="pill">🍽 {recipe.servings}</span>}
             {recipe.prepTime && <span className="pill">⏱ Prep {recipe.prepTime}</span>}
             {recipe.cookTime && <span className="pill">🔥 Cook {recipe.cookTime}</span>}
-            <span className="pill">{recipe.ingredients.length} ingredients</span>
+            <span className="pill">{totalIngredients} ingredients</span>
             <span className="pill">{recipe.steps.length} steps</span>
           </div>
 
@@ -102,7 +111,7 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
             </button>
             <button
               onClick={addAll}
-              disabled={recipe.isNonFood || recipe.ingredients.length === 0}
+              disabled={recipe.isNonFood || totalIngredients === 0}
               className="btn-primary disabled:opacity-50"
             >
               <span>🛒</span>
@@ -115,22 +124,10 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
               <h2 className="h-display text-xl font-medium text-cocoa-800">Ingredients</h2>
               <ScaleControl value={scaleIdx} onChange={setScaleIdx} />
             </div>
-            {recipe.ingredients.length === 0 ? (
+            {totalIngredients === 0 ? (
               <p className="text-cocoa-700/60 text-sm">No ingredients extracted.</p>
             ) : (
-              <ul className="divide-y divide-cocoa-700/10">
-                {scaledIngredients.map((ing, i) => (
-                  <li key={i}>
-                    <button
-                      onClick={() => addOne(ing.text)}
-                      className="w-full text-left py-2.5 px-2 -mx-2 rounded-lg hover:bg-blush-100/60 active:bg-blush-100 transition flex items-start gap-3 group"
-                    >
-                      <span className="mt-0.5 text-terracotta-500 opacity-0 group-hover:opacity-100 transition">+</span>
-                      <span className="text-cocoa-800">{ing.text}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
+              <IngredientList sections={scaledSections} onAddOne={addOne} />
             )}
             <p className="mt-3 text-xs text-cocoa-700/50">Tap any ingredient to add it to your shopping list.</p>
           </div>
@@ -163,6 +160,44 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
         </div>
       )}
     </article>
+  );
+}
+
+function IngredientList({
+  sections,
+  onAddOne,
+}: {
+  sections: IngredientSection[];
+  onAddOne: (text: string) => void;
+}) {
+  return (
+    <div>
+      {sections.map((section, i) => (
+        <div key={i} className={i > 0 ? "mt-5" : ""}>
+          {section.name && (
+            <h3 className="h-display text-sm font-semibold uppercase tracking-wider text-terracotta-600 mb-1.5">
+              {section.name}
+              <span className="ml-2 text-cocoa-700/40 font-normal normal-case tracking-normal">
+                {section.ingredients.length}
+              </span>
+            </h3>
+          )}
+          <ul className="divide-y divide-cocoa-700/10">
+            {section.ingredients.map((ing, j) => (
+              <li key={j}>
+                <button
+                  onClick={() => onAddOne(ing.text)}
+                  className="w-full text-left py-2.5 px-2 -mx-2 rounded-lg hover:bg-blush-100/60 active:bg-blush-100 transition flex items-start gap-3 group"
+                >
+                  <span className="mt-0.5 text-terracotta-500 opacity-0 group-hover:opacity-100 transition">+</span>
+                  <span className="text-cocoa-800">{ing.text}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
   );
 }
 
