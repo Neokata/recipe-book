@@ -70,6 +70,8 @@ function cleanTitle(raw) {
   t = t.replace(/[|·•].*$/, "");
   t = t.replace(/\s*\(?full\s*page\)?$/i, "");
   t = t.replace(/\s*full\s*page$/i, "");
+  // Strip trailing colon (common in docx titles)
+  t = t.replace(/\s*:\s*$/, "");
   t = t.trim();
   // Strip a leading descriptor phrase only if a stronger title remains
   for (const re of STOP_TITLE_PREFIXES) {
@@ -241,6 +243,33 @@ function isLikelyImageOnlyFile(text) {
   return stripped.length < 30;
 }
 
+// Common recipe-web CTAs / social promos that should never be ingredients or steps.
+const WEB_CTA_PATTERNS = [
+  /ingredients have been added to your grocery/i,
+  /recipe has been saved/i,
+  /watch now to discover/i,
+  /let'?s make it\b/i,
+  /^\s*watch\s+now\b/i,
+  /^\s*print\s+recipe\b/i,
+  /^\s*pin\s+recipe\b/i,
+  /^\s*share\s+this\s+recipe\b/i,
+  /^\s*subscribe\s+to\s+my\s+newsletter/i,
+  /^\s*follow\s+me\s+on\b/i,
+  /^\s*this\s+post\s+contains?\s+affiliate/i,
+  /^\s*for\s+more\s+great\s+recipes/i,
+  /^\s*looking\s+for\s+more\b/i,
+  /^\s*if\s+you\s+like\s+this\s+recipe/i,
+  /^\s*love,\s+lindsay\b/i,
+  /^\s*xo[,\s]+\w+/i,
+  /^\s*photos?\s+(by|via)\b/i,
+  /^\s*★{2,}/,
+  /^\s*\d+(\.\d+)?\s+from\s+\d+/i,
+];
+
+function isWebCtaOrIntro(l) {
+  return WEB_CTA_PATTERNS.some((re) => re.test(l));
+}
+
 // --- Categorization (duplicated from lib/parse.ts for the build-time script) ---
 function categorize(title, sourcePath) {
   const t = title.toLowerCase();
@@ -320,82 +349,128 @@ function parseIngredient(raw) {
 
 function extractIngredientsAndSteps(text) {
   if (!text) return { ingredients: [], steps: [] };
-  const lines = text.split(/\r?\n/).map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
-  let mode = null;
-  const ingredients = [];
-  const steps = [];
-  let stepBuf = [];
-  function flushSteps() {
-    if (stepBuf.length) {
-      for (const s of stepBuf) {
-        const clean = s.replace(/^\s*(\d+|[a-z]\))\s*[\.\):\-]?\s+/i, "").trim();
-        if (clean) steps.push(clean);
+  let lines = text.split(/\r?\n/).map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
+
+  // Pass 0: detect lines that are actually multiple ingredients / multiple
+  // steps concatenated without newlines, and split them.
+  // We only split lines that look like an INGREDIENT LIST, not step paragraphs.
+  // A line looks like an ingredient list when:
+  //   - it's long (>60 chars), AND
+  //   - it begins with a qty+unit (not a sentence), AND
+  //   - it contains 3+ qty markers (clearly many ingredients).
+  // Anything else (long step sentences that mention qty in passing) is left alone.
+  const QTY_AT_START = /^(\d+(\.\d+)?(\/\d+)?\s|[½⅓⅔¼¾⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞])/;
+  const newLines = [];
+  for (const line of lines) {
+    if (line.length > 60 && QTY_AT_START.test(line)) {
+      const qtyMatches = [...line.matchAll(/(\d+(\.\d+)?(\/\d+)?|[½⅓⅔¼¾⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞])(?=\s|$)/g)];
+      if (qtyMatches.length >= 3) {
+        // Split on each qty-beginning position (keep the qty with the right side).
+        const pieces = [];
+        let cursor = 0;
+        for (const m of qtyMatches) {
+          const pos = m.index;
+          if (pos > cursor) {
+            pieces.push(line.slice(cursor, pos).trim());
+          }
+          cursor = pos;
+        }
+        pieces.push(line.slice(cursor).trim());
+        for (const p of pieces) {
+          if (p && p.length > 1) newLines.push(p);
+        }
+        continue;
       }
-      stepBuf = [];
     }
+    newLines.push(line);
   }
+  lines = newLines;
 
-  // Section header detector. Returns the recognized label or null.
-  function headerOf(line) {
-    const h = line.match(/^[\s\W]*(ingredients?|method|directions?|instructions?|steps?|preparation)\s*[:.]?\s*$/i);
-    if (!h) return null;
-    return h[1].toLowerCase();
-  }
-
-  // Looks like a qty+unit ingredient (or a sub-label inside an ingredients section).
-  function looksLikeIngredient(line) {
-    return /^(\d+(\.\d+)?(\/\d+)?|\d+\s+\d+\/\d+|[½⅓⅔¼¾⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞])/.test(line);
-  }
+  // Pass 1: identify the role of each line.
+  //   "skip"        — metadata, section labels, page numbers, blank-ish
+  //   "ingredient"  — starts with a quantity (or a unicode fraction)
+  //   "step"        — long sentence with period/punctuation, or numbered, or has a verb
+  //   "header"      — short title-case/uppercase line, possibly ending in ":" (sub-section label)
+  //   "unknown"     — we'll decide based on context
   function looksLikeNumberedStep(line) {
     return /^\d+[\.\)]\s+/.test(line) || /^[a-z]\)\s+/i.test(line);
   }
-
-  for (const line of lines) {
-    const h = headerOf(line);
-    if (h) {
-      if (h.startsWith("ingre")) { flushSteps(); mode = "ingredients"; continue; }
-      if (h === "method" || h.startsWith("direc") || h.startsWith("instruc") || h.startsWith("step") || h.startsWith("prep")) {
-        flushSteps(); mode = "steps"; continue;
-      }
-    }
-    // Drop printable timestamps / page numbers that snuck in
-    if (/^\d{1,2}\/\d{1,2}\/\d{2,4}/.test(line) || /^\d{1,2}:\d{2}\s*(am|pm)/i.test(line)) continue;
-    if (/^page\s+\d+$/i.test(line)) continue;
-
-    if (mode === "ingredients") {
-      // Skip section sub-labels (e.g. "VANILLA CAKE", "Toffee Sauce")
-      if (!looksLikeIngredient(line) && isLikelySectionLabel(line)) continue;
-      // Heuristic: if the line has no leading number+unit AND contains an action verb, it's a step that wandered in
-      if (!looksLikeIngredient(line) && /\b(preheat|mix|stir|bake|whisk|fold|combine|add|pour|place|remove|serve|cook|spread|cream|beat|in a|using)\b/i.test(line) && line.length > 40) {
-        mode = "steps";
-        stepBuf.push(line);
-        continue;
-      }
-      ingredients.push(parseIngredient(line));
-    } else if (mode === "steps") {
-      stepBuf.push(line);
-    } else {
-      // No header found yet — auto-detect.
-      if (looksLikeNumberedStep(line)) {
-        mode = "steps";
-        stepBuf.push(line);
-      } else if (looksLikeIngredient(line)) {
-        mode = "ingredients";
-        ingredients.push(parseIngredient(line));
-      } else if (line.length > 60) {
-        // Long descriptive line — likely a step paragraph.
-        mode = "steps";
-        stepBuf.push(line);
-      } else if (isLikelySectionLabel(line)) {
-        // Skip sub-labels even before any explicit "Ingredients" header.
-        continue;
-      } else if (isMetadataLine(line)) {
-        continue;
-      }
-    }
+  function looksLikeIngredient(line) {
+    return /^(\d+(\.\d+)?(\/\d+)?|\d+\s+\d+\/\d+|[½⅓⅔¼¾⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞])/.test(line);
   }
-  flushSteps();
+  const roleOf = (line, idx) => {
+    if (line.length < 2) return "skip";
+    if (/^\d{1,2}\/\d{1,2}\/\d{2,4}/.test(line) || /^\d{1,2}:\d{2}\s*(am|pm)/i.test(line)) return "skip";
+    if (/^page\s+\d+$/i.test(line)) return "skip";
+    if (isMetadataLine(line)) return "skip";
+    if (looksLikeJunkTitle(line)) return "skip";
+    if (isWebCtaOrIntro(line)) return "skip";
+    if (looksLikeNumberedStep(line)) return "step";
+    if (looksLikeIngredient(line)) return "ingredient";
+    if (line.endsWith(":") && line.length < 60 && !/\b(preheat|mix|stir|bake|whisk|fold|combine|add|pour|place|remove|serve|cook|spread|cream|beat)\b/i.test(line)) return "header";
+    if (isLikelySectionLabel(line)) return "header";
+    if (line.length > 60) return "step";  // long sentence = step
+    return "unknown";
+  };
+
+  const roles = lines.map((l, i) => roleOf(l, i));
+
+  // Pass 2: walk the lines and assign each "unknown" to a role based on
+  // the surrounding context (what came before and what comes after).
+  for (let i = 0; i < lines.length; i++) {
+    if (roles[i] !== "unknown") continue;
+    // Look at the 2 lines before and after for hints
+    const before = roles.slice(Math.max(0, i - 2), i);
+    const after = roles.slice(i + 1, Math.min(lines.length, i + 3));
+    // If we're between two "ingredient" lines, we're an ingredient (e.g. "of flour" without qty)
+    if (before.includes("ingredient") && after.includes("ingredient")) roles[i] = "ingredient";
+    // If we're between two "step" lines or after a step, we're a step continuation
+    else if (before.includes("step")) roles[i] = "step";
+    // If we're between two headers, we're a sub-section divider — treat as header
+    else if (before.includes("header") && after.includes("header")) roles[i] = "header";
+    else roles[i] = "skip";
+  }
+
+  // Pass 3: emit ingredients and steps in document order, but group all
+  // ingredients first (so the app shows them together), then all steps.
+  const ingredientLines = [];
+  const stepLines = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (roles[i] === "ingredient") ingredientLines.push({ text: lines[i], idx: i });
+    else if (roles[i] === "step") stepLines.push({ text: lines[i], idx: i });
+  }
+
+  // De-dupe ingredients (some recipes have the same line listed twice)
+  const seen = new Set();
+  const ingredients = [];
+  for (const { text } of ingredientLines) {
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    ingredients.push(parseIngredient(text));
+  }
+
+  // Numbered steps: strip the leading "1. " / "1) " markers but keep the order.
+  let steps = stepLines.map(({ text }) =>
+    text.replace(/^\s*(\d+|[a-z]\))\s*[\.\):\-]?\s+/i, "").trim()
+  ).filter(Boolean);
+
+  // Drop steps that look like recipe intro blurbs ("These treats are sweet and delicious!")
+  // — they're long, in present tense, end with punctuation, and contain descriptive adjectives.
+  steps = steps.filter((s) => !isRecipeIntroBlurb(s));
+
   return { ingredients, steps };
+}
+
+// Heuristic: a step is a "recipe intro blurb" if it's long, present-tense, descriptive
+// (contains praise words), and doesn't look like a cooking instruction.
+const BLURB_TELL = /\b(love|delicious|amazing|perfect|easy|simple|quick|best|moist|fluffy|soft|tender|sweet|salty|creamy|crunchy|satisfying|comforting|indulgent|irresistible|tasty|yummy|cozy)\b/i;
+const STEP_VERB = /^(preheat|combine|add|mix|stir|whisk|fold|cream|beat|bake|cook|place|put|remove|spread|pour|drizzle|drop|scoop|set|let|allow|refrigerate|chill|cool|heat|melt|whisk|fold|use|line|garnish|serve|stir|spread|sprinkle|press|dust|trim|slice|cut|chop|fold|whisk|knead|roll|dip|brush)/i;
+function isRecipeIntroBlurb(s) {
+  if (s.length < 60) return false;
+  if (!BLURB_TELL.test(s)) return false;
+  if (STEP_VERB.test(s)) return false;  // starts with a cooking verb — real step
+  return true;
 }
 
 function isPicturesCompanionFile(filename) {
