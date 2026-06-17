@@ -792,8 +792,11 @@ async function main() {
     const category = categorize(title, rel);
     const isNonFood = isNonFoodFile(file, text);
 
-    // No image yet — the app will use a category emoji placeholder.
-    const image = null;
+    // No image by default; if extract-images.mjs produced a JPG for this
+    // recipe's slug, use it. The image extractor is a separate step that
+    // runs against the same slugs.
+    const imagePath = path.join(ROOT, "public", "recipes", `${slugFinal}.jpg`);
+    const image = fs.existsSync(imagePath) ? `/recipes/${slugFinal}.jpg` : null;
 
     const flatIngCount = ingredientSections.reduce((n, s) => n + s.ingredients.length, 0);
     const recipe = {

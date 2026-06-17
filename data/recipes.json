@@ -53,7 +53,7 @@
     "title": "Baked Mostaccioli",
     "sourceFile": "Dinner/Easy Baked Mostaccioli.docx",
     "category": "savory-extras",
-    "image": null,
+    "image": "/recipes/baked-mostaccioli.jpg",
     "ingredientSections": [
       {
         "name": null,
@@ -295,7 +295,7 @@
     "title": "Biscoff Cookie Cheesecake Cupcakes",
     "sourceFile": "Biscoff Cheesecake Cupcakes.docx",
     "category": "cupcakes",
-    "image": null,
+    "image": "/recipes/biscoff-cookie-cheesecake-cupcakes.jpg",
     "ingredientSections": [
       {
         "name": "Crust",
@@ -4798,7 +4798,7 @@
     "title": "Coffee Cake Cookies",
     "sourceFile": "Coffee Cake Cookies.docx",
     "category": "cookies-brownies",
-    "image": null,
+    "image": "/recipes/coffee-cake-cookies.jpg",
     "ingredientSections": [
       {
         "name": "Cinnamon Cookies",
@@ -6932,7 +6932,7 @@
     "title": "Frosted Peanut Butter Cookies",
     "sourceFile": "Frosted Peanut Butter Cookies.docx",
     "category": "cookies-brownies",
-    "image": null,
+    "image": "/recipes/frosted-peanut-butter-cookies.jpg",
     "ingredientSections": [
       {
         "name": "Peanut Butter Cookies",
@@ -7031,7 +7031,7 @@
     "title": "Frosted Strawberry Crunch Cookies",
     "sourceFile": "Frosted Strawberry Crunch Cookies.docx",
     "category": "cookies-brownies",
-    "image": null,
+    "image": "/recipes/frosted-strawberry-crunch-cookies.jpg",
     "ingredientSections": [
       {
         "name": "Vanilla Cookies",
@@ -8198,7 +8198,7 @@
     "title": "Holiday Stove Top Potpourri",
     "sourceFile": "Christmas/Stovetop Potpourri Recipe.docx",
     "category": "savory-extras",
-    "image": null,
+    "image": "/recipes/holiday-stove-top-potpourri.jpg",
     "isNonFood": true,
     "ingredientSections": [
       {
@@ -9117,7 +9117,7 @@
     "title": "Lemon Cheesecake Crescent Rolls",
     "sourceFile": "Lemon Cheesecake Crescent Rolls.docx",
     "category": "cheesecakes",
-    "image": null,
+    "image": "/recipes/lemon-cheesecake-crescent-rolls.jpg",
     "ingredientSections": [
       {
         "name": null,
@@ -10262,7 +10262,7 @@
     "title": "Marshmallow Snowmen",
     "sourceFile": "Christmas/Marshmallow Snowmen.docx",
     "category": "savory-extras",
-    "image": null,
+    "image": "/recipes/marshmallow-snowmen.jpg",
     "ingredientSections": [
       {
         "name": null,
@@ -10664,7 +10664,7 @@
     "title": "Mini Chocolate Chip Cookies",
     "sourceFile": "Mini Chocolate Chip Cookies.docx",
     "category": "cookies-brownies",
-    "image": null,
+    "image": "/recipes/mini-chocolate-chip-cookies.jpg",
     "ingredientSections": [
       {
         "name": null,
@@ -11154,7 +11154,7 @@
     "title": "Miniature, Single-use Soaps",
     "sourceFile": "Christmas/Miniature Single Use Soaps.docx",
     "category": "savory-extras",
-    "image": null,
+    "image": "/recipes/miniature-single-use-soaps.jpg",
     "isNonFood": true,
     "ingredientSections": [
       {
@@ -13331,7 +13331,7 @@
     "title": "Peppermint Sugar Scrub",
     "sourceFile": "Christmas/Peppermint Sugar Scrub.docx",
     "category": "savory-extras",
-    "image": null,
+    "image": "/recipes/peppermint-sugar-scrub.jpg",
     "isNonFood": true,
     "ingredientSections": [
       {
@@ -15199,7 +15199,7 @@
     "title": "Reindeer Hot Chocolate Cones",
     "sourceFile": "Christmas/Reindeer Hot Chocolate Recipe.docx",
     "category": "no-bake",
-    "image": null,
+    "image": "/recipes/reindeer-hot-chocolate-cones.jpg",
     "ingredientSections": [
       {
         "name": "Mini Marshmallows",
@@ -15897,7 +15897,7 @@
     "title": "Sherita’s Sweet Victory Cup-cheesecakes",
     "sourceFile": "Sherita Cupcakes Biscoff.docx",
     "category": "cheesecakes",
-    "image": null,
+    "image": "/recipes/sherita-s-sweet-victory-cup-cheesecakes.jpg",
     "ingredientSections": [
       {
         "name": "Crust",
@@ -16459,7 +16459,7 @@
     "title": "Strawberry Cheesecake Cupcakes",
     "sourceFile": "Strawberry Cheesecake Cupcakes - Facebook.docx",
     "category": "cupcakes",
-    "image": null,
+    "image": "/recipes/strawberry-cheesecake-cupcakes.jpg",
     "ingredientSections": [
       {
         "name": null,
@@ -17409,7 +17409,7 @@
     "title": "Twisted Sugar Salted Caramel Sugar Cookies",
     "sourceFile": "Salted Caramel Sugar Cookies.docx",
     "category": "cookies-brownies",
-    "image": null,
+    "image": "/recipes/twisted-sugar-salted-caramel-sugar-cookies.jpg",
     "ingredientSections": [
       {
         "name": null,
